@@ -49,7 +49,8 @@ public unsafe class Mod : ModBase // <= Do not Remove.
     private IHook<GivePartyMemberExpDelegate> _givePartyMemberExpHook;
     private IHook<LevelUpPartyMemberDelegate> _levelUpPartyMemberHook;
 
-    private GainsInfo?[] _gains = new GainsInfo?[11];
+    private Dictionary<PartyMember, int> _expGains = new();
+    private Dictionary<PartyMember, PersonaStatChanges> _levelUps = new();
 
     public Mod(ModContext context)
     {
@@ -73,10 +74,10 @@ public unsafe class Mod : ModBase // <= Do not Remove.
             _givePartyMemberExpHook = _hooks.CreateHook<GivePartyMemberExpDelegate>(GivePartyMemberExp, address).Activate();
         });
 
-        //Utils.SigScan("48 89 5C 24 ?? 48 89 6C 24 ?? 56 57 41 56 48 81 EC B0 00 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 48 8B E9 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B CD", "LevelUpPartyMember", address =>
-        //{
-        //    _levelUpPartyMemberHook = _hooks.CreateHook<LevelUpPartyMemberDelegate>(LevelUpPartyMember, address).Activate();
-        //});
+        Utils.SigScan("48 89 5C 24 ?? 48 89 6C 24 ?? 56 57 41 56 48 81 EC B0 00 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 48 8B E9 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B CD", "LevelUpPartyMember", address =>
+        {
+            _levelUpPartyMemberHook = _hooks.CreateHook<LevelUpPartyMemberDelegate>(LevelUpPartyMember, address).Activate();
+        });
     }
 
     private void SetupResultsExp(BattleResults* results, astruct_2* param_2)
@@ -85,7 +86,8 @@ public unsafe class Mod : ModBase // <= Do not Remove.
 
         for (PartyMember member = PartyMember.Yukari; member <= PartyMember.Koromaru; member++)
         {
-            _gains[(int)member] = null;
+            _expGains.Remove(member);
+            _levelUps.Remove(member);
             if (!IsInactive(member, results)) continue;
 
             var persona = GetPartyMemberPersona(member);
@@ -95,14 +97,14 @@ public unsafe class Mod : ModBase // <= Do not Remove.
             var gainedExp = CalculateGainedExp(level, param_2);
             var currentExp = persona->Exp;
             var requiredExp = GetPersonaRequiredExp(persona, (ushort)(level + 1));
-            _gains[(int)member] = new GainsInfo { GainedExp = gainedExp };
+            _expGains[member] = gainedExp;
             if (requiredExp <= currentExp + gainedExp)
             {
+                Utils.LogDebug($"{member} is ready to level up");
                 results->LevelUpStatus |= 0x10; // signify that a party member is ready to level up
-                fixed (PersonaStatChanges* statChanges = &_gains[(int)member]!.StatChanges)
-                {
-                    GenerateLevelUpPersona(persona, statChanges, gainedExp);
-                }
+                var statChanges = new PersonaStatChanges { };
+                GenerateLevelUpPersona(persona, &statChanges, gainedExp);
+                _levelUps[member] = statChanges;
             }
         }
     }
@@ -126,44 +128,58 @@ public unsafe class Mod : ModBase // <= Do not Remove.
             if (!IsInactive(member, results)) continue;
 
             var persona = GetPartyMemberPersona(member);
-            var expGained = _gains[(int)member]!.GainedExp;
+            var expGained = _expGains[member];
             persona->Exp += expGained;
             Utils.LogDebug($"Gave {expGained} exp to {member}");
 
             if (CanPersonaLevelUp(persona, (nuint)expGained, param_3, param_4) != 0)
             {
-                fixed (PersonaStatChanges* statChanges = &_gains[(int)member]!.StatChanges)
-                {
-                    Utils.LogDebug($"Leveling up {member}");
-                    LevelUpPersona(persona, statChanges);
-                }
+                var statChanges = _levelUps[member];
+                Utils.LogError($"Levelling up {member} without menu display, this shouldn't happen!");
+                LevelUpPersona(persona, &statChanges);
             }
         }
     }
 
-    private void LevelUpPartyMember(BattleResultsThing* results)
+    private nuint LevelUpPartyMember(BattleResultsThing* resultsThing)
     {
         // We only want to change stuff in state 1 (when it's picking a Persona's level up stuff to deal with)
-        if (results->Thing->State != 1)
+        var thing = resultsThing->Thing;
+        if (thing->State > 1 || _levelUps.Count == 0)
         {
-            _levelUpPartyMemberHook.OriginalFunction(results);
-            return;
+            return _levelUpPartyMemberHook.OriginalFunction(resultsThing);
         }
 
+        var results = &thing->Info->Results;
 
+        // Wait until all of the real level ups have been done so we can safely overwrite their data
+        for (int i = thing->LevelUpSlot; i < 4; i++)
+        {
+            if ((&results->PersonaChanges)[i].LevelIncrease != 0)
+            {
+                return _levelUpPartyMemberHook.OriginalFunction(resultsThing);
+            }
+        }
 
-        _levelUpPartyMemberHook.OriginalFunction(results);
+        // Change the data of an active party member to an inactive one
+        thing->LevelUpSlot = 0;
+        var levelUp = _levelUps.First();
+        var member = levelUp.Key;
+        var statChanges = levelUp.Value;
+        results->PartyMembers[0] = (short)member;
+        results->ExpGains[0] = (uint)_expGains[member];
+        results->PersonaChanges = statChanges;
+
+        Utils.LogDebug($"Leveling up {member}");
+        _levelUps.Remove(member);
+
+        return _levelUpPartyMemberHook.OriginalFunction(resultsThing);
+
     }
 
     private delegate void SetupResultsExpDelegate(BattleResults* results, astruct_2* param_2);
     private delegate void GivePartyMemberExpDelegate(BattleResults* results, nuint param_2, nuint param_3, nuint param_4);
-    private delegate void LevelUpPartyMemberDelegate(BattleResultsThing* results);
-
-    private class GainsInfo
-    {
-        internal PersonaStatChanges StatChanges;
-        internal int GainedExp;
-    }
+    private delegate nuint LevelUpPartyMemberDelegate(BattleResultsThing* results);
 
     #region Standard Overrides
     public override void ConfigurationUpdated(Config configuration)
