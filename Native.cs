@@ -31,10 +31,11 @@ internal static unsafe class Native
         {
             CalculateGainedExp = hooks.CreateWrapper<CalculateGainedExpDelegate>(address, out _);
         });
-
-        Utils.SigScan("48 89 5C 24 ?? 57 48 83 EC 20 48 89 CF 0F B7 DA 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 66 8B 05 ?? ?? ?? ??", "GetPersonaRequiredExp", address =>
+        Utils.SigScan("E8 ?? ?? ?? ?? BB C0 00 00 00 41 3B C7", "GetPersonaRequiredExpPtr", address =>
         {
-            GetPersonaRequiredExp = hooks.CreateWrapper<GetPersonaRequiredExpDelegate>(address, out _);
+            var funcAddress = Utils.GetGlobalAddress(address + 1);
+            Utils.LogDebug($"Found GetPersonaRequiredExp at 0x{funcAddress:X}");
+            GetPersonaRequiredExp = hooks.CreateWrapper<GetPersonaRequiredExpDelegate>((long)funcAddress, out _);
         });
 
         Utils.SigScan("48 89 5C 24 ?? 48 89 54 24 ?? 48 89 4C 24 ?? 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 30", "GenerateLevelUpPersona", address =>
@@ -42,9 +43,11 @@ internal static unsafe class Native
             GenerateLevelUpPersona = hooks.CreateWrapper<GenerateLevelUpPersonaDelegate>(address, out _);
         });
 
-        Utils.SigScan("48 8D A4 24 ?? ?? ?? ?? 48 89 AC 24 ?? ?? ?? ?? 55 48 F7 DD 48 FF CD 48 F7 14 24", "CanPersonaLevelUp", address =>
+        Utils.SigScan("E8 ?? ?? ?? ?? 85 C0 74 ?? 48 89 FA", "CanPersonaLevelUpPtr", address =>
         {
-            CanPersonaLevelUp = hooks.CreateWrapper<CanPersonaLevelUpDelegate>(address, out _);
+            var funcAddress = Utils.GetGlobalAddress(address + 1);
+            Utils.LogDebug($"Found CanPersonaLevelUp at 0x{funcAddress:X}");
+            CanPersonaLevelUp = hooks.CreateWrapper<CanPersonaLevelUpDelegate>((long)funcAddress, out _);
         });
 
         Utils.SigScan("48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 89 CB 48 89 D7 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 0F B7 43 ??", "LevelUpPersona", address =>
