@@ -155,8 +155,22 @@ public unsafe class Mod : ModBase // <= Do not Remove.
 
     private nuint LevelUpPartyMember(BattleResultsThing* resultsThing)
     {
-        // We only want to change stuff in state 1 (when it's picking a Persona's level up stuff to deal with)
         var thing = resultsThing->Thing;
+        // Give exp to any inactive members that didn't level up
+        if(_levelUps.Count == 0 && _expGains.Count > 0)
+        {
+            for(int i = 0; i < _expGains.Count; i++)
+            {
+                var partyMember = _expGains.First().Key;
+                var persona = GetPartyMemberPersona(partyMember);
+                var expGained = _expGains[partyMember];
+                persona->Exp += expGained;
+                _expGains.Remove(partyMember);
+                Utils.LogDebug($"Gave {expGained} exp to {partyMember}");
+            }
+        }
+
+        // We only want to change stuff in state 1 (when it's picking a Persona's level up stuff to deal with)
         if (thing->State > 1 || _levelUps.Count == 0)
         {
             return _levelUpPartyMemberHook.OriginalFunction(resultsThing);
@@ -184,6 +198,7 @@ public unsafe class Mod : ModBase // <= Do not Remove.
 
         Utils.LogDebug($"Leveling up {member}");
         _levelUps.Remove(member);
+        _expGains.Remove(member);
 
         return _levelUpPartyMemberHook.OriginalFunction(resultsThing);
 
