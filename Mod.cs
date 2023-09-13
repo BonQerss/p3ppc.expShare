@@ -100,7 +100,7 @@ public unsafe class Mod : ModBase // <= Do not Remove.
             var level = persona->Level;
             if (level >= 99) continue;
 
-            var gainedExp = CalculateGainedExp(level, param_2);
+            int gainedExp = (int)(CalculateGainedExp(level, param_2) * _configuration.ExpMultiplier);
             var currentExp = persona->Exp;
             var requiredExp = GetPersonaRequiredExp(persona, (ushort)(level + 1));
             _expGains[member] = gainedExp;
