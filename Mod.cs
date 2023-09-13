@@ -51,6 +51,8 @@ public unsafe class Mod : ModBase // <= Do not Remove.
 
     private Dictionary<PartyMember, int> _expGains = new();
     private Dictionary<PartyMember, PersonaStatChanges> _levelUps = new();
+    private short[] _available = new short[9];
+    private int _numAvailable = 0;
 
     public Mod(ModContext context)
     {
@@ -82,6 +84,10 @@ public unsafe class Mod : ModBase // <= Do not Remove.
 
     private void SetupResultsExp(BattleResults* results, astruct_2* param_2)
     {
+        fixed(short* party = &_available[0])
+        {
+            _numAvailable = GetAvailableParty(party);
+        }
         _setupExpHook.OriginalFunction(results, param_2);
 
         for (PartyMember member = PartyMember.Yukari; member <= PartyMember.Koromaru; member++)
@@ -111,12 +117,18 @@ public unsafe class Mod : ModBase // <= Do not Remove.
 
     private bool IsInactive(PartyMember member, BattleResults* results)
     {
+        // Check if they're already in the party
         for (int i = 0; i < 4; i++)
         {
             if (results->PartyMembers[i] == (short)member) return false;
         }
-        // TODO also check for party members actually being available (either by date or a flag in their thing)
-        return true;
+
+        // Check if they're available
+        for(int i = 0; i < _numAvailable; i++)
+        {
+            if (_available[i] == (short)member) return true;
+        }
+        return false;
     }
 
     private void GivePartyMemberExp(BattleResults* results, nuint param_2, nuint param_3, nuint param_4)

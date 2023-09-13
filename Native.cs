@@ -18,6 +18,7 @@ internal static unsafe class Native
     internal static GenerateLevelUpPersonaDelegate GenerateLevelUpPersona;
     internal static CanPersonaLevelUpDelegate CanPersonaLevelUp;
     internal static LevelUpPersonaDelegate LevelUpPersona;
+    internal static GetAvailablePartyDelegate GetAvailableParty;
 
     internal static void Initialise(IReloadedHooks hooks)
     {
@@ -46,9 +47,14 @@ internal static unsafe class Native
             CanPersonaLevelUp = hooks.CreateWrapper<CanPersonaLevelUpDelegate>(address, out _);
         });
 
-        Utils.SigScan("48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 89 CB 48 89 D7 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 0F B7 43 ??", "levelUpPersona", address =>
+        Utils.SigScan("48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 89 CB 48 89 D7 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 0F B7 43 ??", "LevelUpPersona", address =>
         {
             LevelUpPersona = hooks.CreateWrapper<LevelUpPersonaDelegate>(address, out _);
+        });
+
+        Utils.SigScan("48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 41 56 41 57 48 83 EC 40 4C 8B F1 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? BD 01 00 00 00 45 33 FF 41 0F B7 F7", "GetAvailableParty", address =>
+        {
+            GetAvailableParty = hooks.CreateWrapper<GetAvailablePartyDelegate>(address, out _);
         });
     }
 
@@ -58,6 +64,7 @@ internal static unsafe class Native
     internal delegate void GenerateLevelUpPersonaDelegate(Persona* persona, PersonaStatChanges* changes, int gainedExp);
     internal delegate nuint CanPersonaLevelUpDelegate(Persona* persona, nuint expGained, nuint param_3, nuint param_4);
     internal delegate void LevelUpPersonaDelegate(Persona* persona, PersonaStatChanges* personaStatChanges);
+    internal delegate short GetAvailablePartyDelegate(short* party);
 
     [StructLayout(LayoutKind.Explicit)]
     internal struct Persona
