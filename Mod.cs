@@ -137,7 +137,7 @@ public unsafe class Mod : ModBase // <= Do not Remove.
 
         for (PartyMember member = PartyMember.Yukari; member <= PartyMember.Koromaru; member++)
         {
-            if (!IsInactive(member, results)) continue;
+            if (!IsInactive(member, results) || !_expGains.ContainsKey(member)) continue;
 
             var persona = GetPartyMemberPersona(member);
             var expGained = _expGains[member];
