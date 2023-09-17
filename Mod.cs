@@ -178,14 +178,33 @@ public unsafe class Mod : ModBase // <= Do not Remove.
 
         var results = &thing->Info->Results;
 
+        Utils.LogDebug($"LevelUpSlot = {thing->LevelUpSlot}");
+        for(int i = 0; i < 4; i++)
+        {
+            Utils.LogDebug($"Slot {i} is {(PartyMember)results->PartyMembers[i]} who has {(&results->PersonaChanges)[i].LevelIncrease} level increases and {results->ExpGains[i]} exp gained.");
+        }
+
         // Wait until all of the real level ups have been done so we can safely overwrite their data
         for (int i = thing->LevelUpSlot; i < 4; i++)
         {
+            var curMember = results->PartyMembers[i];
+            if (curMember == 0) continue;
+
             if ((&results->PersonaChanges)[i].LevelIncrease != 0)
             {
                 return _levelUpPartyMemberHook.OriginalFunction(resultsThing);
             }
+            else
+            {
+                // Give them the exp ourself and clear them to ensure they get it exactly once
+                GetPartyMemberPersona((PartyMember)curMember)->Exp += (int)results->ExpGains[i];
+                results->PartyMembers[i] = 0;
+            }
         }
+
+        // Clear all of the real level ups so they can't loop
+        for(int i = 1; i < 4; i++)
+            results->PartyMembers[i] = 0;
 
         // Change the data of an active party member to an inactive one
         thing->LevelUpSlot = 0;
