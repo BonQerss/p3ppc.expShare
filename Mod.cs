@@ -2,9 +2,7 @@
 using p3ppc.expShare.NuGet.templates.defaultPlus;
 using p3ppc.expShare.Template;
 using Reloaded.Hooks.Definitions;
-using Reloaded.Hooks.ReloadedII.Interfaces;
 using Reloaded.Mod.Interfaces;
-using System.IO;
 using static p3ppc.expShare.Native;
 using IReloadedHooks = Reloaded.Hooks.ReloadedII.Interfaces.IReloadedHooks;
 
@@ -90,6 +88,7 @@ public unsafe class Mod : ModBase // <= Do not Remove.
         }
         _setupExpHook.OriginalFunction(results, param_2);
 
+        // Setup Party Exp
         for (PartyMember member = PartyMember.Yukari; member <= PartyMember.Koromaru; member++)
         {
             _expGains.Remove(member);
@@ -100,7 +99,7 @@ public unsafe class Mod : ModBase // <= Do not Remove.
             var level = persona->Level;
             if (level >= 99) continue;
 
-            int gainedExp = (int)(CalculateGainedExp(level, param_2) * _configuration.ExpMultiplier);
+            int gainedExp = (int)(CalculateGainedExp(level, param_2) * _configuration.PartyExpMultiplier);
             var currentExp = persona->Exp;
             var requiredExp = GetPersonaRequiredExp(persona, (ushort)(level + 1));
             _expGains[member] = gainedExp;
@@ -111,6 +110,30 @@ public unsafe class Mod : ModBase // <= Do not Remove.
                 var statChanges = new PersonaStatChanges { };
                 GenerateLevelUpPersona(persona, &statChanges, gainedExp);
                 _levelUps[member] = statChanges;
+            }
+        }
+
+        // Setup Protag Persona Exp
+        var activePersona = GetPartyMemberPersona(PartyMember.Protag);
+        for (short i = 0; i < 12; i++)
+        {
+            var persona = GetProtagPersona(i);
+            if (persona == (Persona*)0 || persona->Id == activePersona->Id)
+                continue;
+
+            var level = persona->Level;
+            if (level >= 99) continue;
+
+            results->ProtagExpGains[i] += (uint)(CalculateGainedExp(level, param_2) * _configuration.PersonaExpMultiplier);
+            int gainedExp = (int)results->ProtagExpGains[i];
+            Utils.LogDebug($"Giving Protag Persona {i} ({persona->Id}) {gainedExp} exp");
+            var currentExp = persona->Exp;
+            var requiredExp = GetPersonaRequiredExp(persona, (ushort)(level + 1));
+            if (requiredExp <= currentExp + gainedExp)
+            {
+                Utils.LogDebug($"Protag Persona {i} ({persona->Id}) is ready to level up");
+                results->LevelUpStatus |= 8; // signify that a protag persona is ready to level up
+                GenerateLevelUpPersona(persona, &(&results->ProtagPersonaChanges)[i], gainedExp);
             }
         }
     }
