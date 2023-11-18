@@ -2,7 +2,7 @@
   "ModId": "p3ppc.expShare",
   "ModName": "Exp Share",
   "ModAuthor": "AnimatedSwine37",
-  "ModVersion": "1.0.1",
+  "ModVersion": "1.1.0",
   "ModDescription": "Makes inactive party members gain exp",
   "ModDll": "p3ppc.expShare.dll",
   "ModIcon": "Preview.png",
