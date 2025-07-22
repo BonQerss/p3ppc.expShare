@@ -46,11 +46,49 @@ public unsafe class Mod : ModBase // <= Do not Remove.
     private IHook<SetupResultsExpDelegate> _setupExpHook;
     private IHook<GivePartyMemberExpDelegate> _givePartyMemberExpHook;
     private IHook<LevelUpPartyMemberDelegate> _levelUpPartyMemberHook;
+    private delegate int GetTotalDayDelegate();
+    private GetTotalDayDelegate _getTotalDay;
 
     private Dictionary<PartyMember, int> _expGains = new();
     private Dictionary<PartyMember, PersonaStatChanges> _levelUps = new();
     private short[] _available = new short[9];
     private int _numAvailable = 0;
+
+    // Function delegates - based on actual assembly analysis
+    private delegate void GiveProtagExpDelegate(IntPtr results, IntPtr param2, IntPtr param3, IntPtr param4);
+    private delegate void GivePersonaExpDelegate(IntPtr persona, uint exp);
+    private delegate IntPtr GetProtagPersonaDelegate(short slot);
+    private delegate IntPtr GetPartyMemberPersonaDelegate(IntPtr partyMemberInfo);
+    private delegate byte GetPersonaLevelDelegate(IntPtr persona);
+    private delegate byte GetPartyMemberLevelDelegate(IntPtr partyMemberInfo);
+    private delegate ushort GetNumPersonasDelegate();
+
+    // Hooks
+    private IHook<GiveProtagExpDelegate> _giveProtagExpHook;
+    private IHook<GivePersonaExpDelegate> _givePersonaExpHook;
+
+    // Function wrappers - based on actual assembly
+    private GetProtagPersonaDelegate _getProtagPersona;
+    private GetPartyMemberPersonaDelegate _getPartyMemberPersona;
+    private GetPersonaLevelDelegate _getPersonaLevel;
+    private GetPartyMemberLevelDelegate _getPartyMemberLevel;
+    private GetNumPersonasDelegate _getNumPersonas;
+
+
+    private readonly SortedDictionary<int, int> _levelCaps = new SortedDictionary<int, int>
+        {
+            { 0x26, 8 },   // May 9th
+            { 0x44, 15 },   // June 8th
+            { 0x61, 21 },   // July 7th 
+            { 0x79, 32 },  // August 6th
+            { 0x8F, 40 },  // September 5th
+            { 0x9D, 46 },  // October 4th
+            { 0xE1, 54 },  // November 3rd
+            { 0xF4, 54 },  // November 22nd
+            { 0x131, 76 }   // July 31st
+        };
+
+    private bool _isGivingExp = false;
 
     public Mod(ModContext context)
     {
@@ -78,11 +116,126 @@ public unsafe class Mod : ModBase // <= Do not Remove.
         {
             _levelUpPartyMemberHook = _hooks.CreateHook<LevelUpPartyMemberDelegate>(LevelUpPartyMember, address).Activate();
         });
+
+        // Get GetTotalDay function
+        Utils.SigScan("E8 ?? ?? ?? ?? 0F BF C8 89 0D ?? ?? ?? ?? 89 74 24 ??", "GetTotalDay", address =>
+        {
+            var funcAddress = Utils.GetGlobalAddress((nint)(address + 1));
+            _getTotalDay = _hooks.CreateWrapper<GetTotalDayDelegate>((long)funcAddress, out _);
+            _logger.WriteLine($"Found GetTotalDay at 0x{funcAddress:X}");
+        });
+
+        Utils.SigScan("40 53 48 83 EC 20 48 89 CB 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 0F B6 43 ?? 48 83 C4 20", "GetPersonaLevel", address =>
+        {
+            _getPersonaLevel = _hooks.CreateWrapper<GetPersonaLevelDelegate>(address, out _);
+            _logger.WriteLine($"Found GetPersonaLevel at 0x{address:X}");
+        });
+    }
+
+    private int GetCurrentLevelCap()
+    {
+        if (_getTotalDay == null)
+        {
+            _logger.WriteLine("[GetCurrentLevelCap] _getTotalDay delegate is null. Returning 99 (no cap).");
+            return 99;
+        }
+
+        int currentDay = 0;
+        try
+        {
+            currentDay = _getTotalDay();
+            _logger.WriteLine($"[GetCurrentLevelCap] Current day from _getTotalDay: 0x{currentDay:X}");
+        }
+        catch (Exception ex)
+        {
+            _logger.WriteLine($"[GetCurrentLevelCap] Exception calling _getTotalDay: {ex.Message}");
+            return 99;
+        }
+
+        int maxLevel = 1;
+        foreach (var kvp in _levelCaps)
+        {
+            if (currentDay >= kvp.Key)
+            {
+                maxLevel = kvp.Value;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        _logger.WriteLine($"[GetCurrentLevelCap] Returning max level cap: {maxLevel}");
+        return maxLevel;
+    }
+
+    private bool IsPersonaAtLevelCap(IntPtr persona)
+    {
+        if (persona == IntPtr.Zero)
+        {
+            _logger.WriteLine("[IsPersonaAtLevelCap] persona pointer is zero");
+            return false;
+        }
+
+        if (_getPersonaLevel == null)
+        {
+            _logger.WriteLine("[IsPersonaAtLevelCap] _getPersonaLevel delegate is null");
+            return false;
+        }
+
+        byte currentLevel = 0;
+        try
+        {
+            currentLevel = _getPersonaLevel(persona);
+            _logger.WriteLine($"[IsPersonaAtLevelCap] Persona current level: {currentLevel}");
+        }
+        catch (Exception ex)
+        {
+            _logger.WriteLine($"[IsPersonaAtLevelCap] Exception calling _getPersonaLevel: {ex.Message}");
+            return false;
+        }
+
+        int levelCap = GetCurrentLevelCap();
+        bool atCap = currentLevel >= levelCap;
+        _logger.WriteLine($"[IsPersonaAtLevelCap] Level cap: {levelCap}, At cap: {atCap}");
+        return atCap;
+    }
+
+    private bool IsPartyMemberAtLevelCap(IntPtr partyMemberInfo)
+    {
+        if (partyMemberInfo == IntPtr.Zero)
+        {
+            _logger.WriteLine("[IsPartyMemberAtLevelCap] partyMemberInfo pointer is zero");
+            return false;
+        }
+
+        if (_getPartyMemberLevel == null)
+        {
+            _logger.WriteLine("[IsPartyMemberAtLevelCap] _getPartyMemberLevel delegate is null");
+            return false;
+        }
+
+        byte currentLevel = 0;
+        try
+        {
+            currentLevel = _getPartyMemberLevel(partyMemberInfo);
+            _logger.WriteLine($"[IsPartyMemberAtLevelCap] Party member current level: {currentLevel}");
+        }
+        catch (Exception ex)
+        {
+            _logger.WriteLine($"[IsPartyMemberAtLevelCap] Exception calling _getPartyMemberLevel: {ex.Message}");
+            return false;
+        }
+
+        int levelCap = GetCurrentLevelCap();
+        bool atCap = currentLevel >= levelCap;
+        _logger.WriteLine($"[IsPartyMemberAtLevelCap] Level cap: {levelCap}, At cap: {atCap}");
+        return atCap;
     }
 
     private void SetupResultsExp(BattleResults* results, astruct_2* param_2)
     {
-        fixed(short* party = &_available[0])
+        fixed (short* party = &_available[0])
         {
             _numAvailable = GetAvailableParty(party);
         }
@@ -97,7 +250,12 @@ public unsafe class Mod : ModBase // <= Do not Remove.
 
             var persona = GetPartyMemberPersona(member);
             var level = persona->Level;
-            if (level >= 99) continue;
+            int levelCap = GetCurrentLevelCap();
+            if (level >= 99 || level >= levelCap)
+            {
+                Utils.LogDebug($"{member} is above or at level cap ({level} >= {levelCap}), skipping EXP gain.");
+                continue;
+            }
 
             int gainedExp = (int)(CalculateGainedExp(level, param_2) * _configuration.PartyExpMultiplier);
             var currentExp = persona->Exp;
@@ -115,6 +273,7 @@ public unsafe class Mod : ModBase // <= Do not Remove.
 
         // Setup Protag Persona Exp
         var activePersona = GetPartyMemberPersona(PartyMember.Protag);
+        int levelCapForProtag = GetCurrentLevelCap();
         for (short i = 0; i < 12; i++)
         {
             var persona = GetProtagPersona(i);
@@ -122,11 +281,18 @@ public unsafe class Mod : ModBase // <= Do not Remove.
                 continue;
 
             var level = persona->Level;
-            if (level >= 99) continue;
+            if (level >= 99 || level >= levelCapForProtag)
+            {
+                Utils.LogDebug($"Protag Persona {i} ({persona->Id}) is at or above level cap ({level} >= {levelCapForProtag}), skipping EXP.");
+                results->ProtagExpGains[i] = 0;
+                continue;
+            }
 
-            results->ProtagExpGains[i] += (uint)(CalculateGainedExp(level, param_2) * _configuration.PersonaExpMultiplier);
-            int gainedExp = (int)results->ProtagExpGains[i];
+            int gainedExp = (int)(CalculateGainedExp(level, param_2) * _configuration.PersonaExpMultiplier);
+            results->ProtagExpGains[i] += (uint)gainedExp;
+
             Utils.LogDebug($"Giving Protag Persona {i} ({persona->Id}) {gainedExp} exp");
+
             var currentExp = persona->Exp;
             var requiredExp = GetPersonaRequiredExp(persona, (ushort)(level + 1));
             if (requiredExp <= currentExp + gainedExp)
@@ -137,6 +303,7 @@ public unsafe class Mod : ModBase // <= Do not Remove.
             }
         }
     }
+
 
     private bool IsInactive(PartyMember member, BattleResults* results)
     {
@@ -164,9 +331,18 @@ public unsafe class Mod : ModBase // <= Do not Remove.
 
             var persona = GetPartyMemberPersona(member);
             var expGained = _expGains[member];
-            persona->Exp += expGained;
-            Utils.LogDebug($"Gave {expGained} exp to {member}");
 
+            if (IsPartyMemberAtLevelCap(new IntPtr(persona)))
+            {
+                Utils.LogDebug($"{member} is at/above level cap, zeroing EXP gain.");
+                expGained = 0;
+            }
+            else
+            {
+                persona->Exp += expGained;
+                Utils.LogDebug($"Gave {expGained} exp to {member}");
+            }
+               
             if (CanPersonaLevelUp(persona, (nuint)expGained, param_3, param_4) != 0)
             {
                 var statChanges = _levelUps[member];
